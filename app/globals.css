@@ -392,6 +392,56 @@ input[type='range']::-moz-range-thumb {
   padding: 9px 32px;
   font-size: 14px;
 }
+/* ── Toggle dim label ── */
+.toggle-dim {
+  font-size: 9px;
+  color: #3d5068;
+  margin-left: 5px;
+  font-style: italic;
+}
+
+/* ── Rush hour clock ── */
+.rush-clock {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px 8px;
+  margin-bottom: 10px;
+}
+.rush-time {
+  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif;
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
+  letter-spacing: 0.05em;
+}
+.rush-period {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin: 3px 0 8px;
+  transition: color 0.5s;
+}
+.rush-bar-wrap {
+  background: var(--dim);
+  border-radius: 2px;
+  height: 4px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.rush-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.5s ease, background 0.5s ease;
+}
+.rush-bar-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9px;
+  color: var(--muted);
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

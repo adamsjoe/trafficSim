@@ -7,16 +7,14 @@ export interface RoadGraph {
   nodes: Record<number, LatLng>;
   edges: Record<number, number[]>;
   nodeIds: number[];
-  /** Set of "nodeA-nodeB" pairs that are currently closed to traffic */
+  /** Edges blocked by user closure */
   closedEdges: Set<string>;
-}
-
-export interface PolylineData {
-  polyline: import('leaflet').Polyline;
-  nodeSeq: number[];
-  originalColor: string;
-  originalWeight: number;
-  closed: boolean;
+  /** Live car count per directed edge key "a-b" */
+  edgeCounts: Map<string, number>;
+  /** Speed multiplier per directed edge, derived from highway class */
+  edgeWeights: Map<string, number>;
+  /** Signal node id → phase offset in seconds (0–89) */
+  signalNodes: Map<number, number>;
 }
 
 export interface SimParams {
@@ -28,13 +26,28 @@ export interface SimParams {
   roadOpacity: number;
 }
 
-/** Trails are disabled above this car count to maintain framerate */
-export const TRAIL_MAX_CARS = 400;
+export interface RealismSettings {
+  congestion:      boolean;
+  weightedRouting: boolean;
+  signals:         boolean;
+  colorBySpeed:    boolean;
+  rushHour:        boolean;
+  timeScale:       number;   // sim seconds per real second (1–300)
+}
+
+export interface CarUpdateConfig {
+  speedMult:       number;
+  simTime:         number;   // seconds from midnight
+  congestion:      boolean;
+  weightedRouting: boolean;
+  signals:         boolean;
+}
 
 export interface RoadTypeConfig {
-  label: string;
-  color: string;
-  weight: number;
+  label:   string;
+  color:   string;
+  weight:  number;
+  speed:   number;   // base speed multiplier for this road class
   enabled: boolean;
 }
 
@@ -48,10 +61,14 @@ export interface StatusState {
 }
 
 export interface LiveStats {
-  cars: number;
-  fps: string;
-  nodes: string;
-  edges: string;
+  cars:     number;
+  fps:      string;
+  nodes:    string;
+  edges:    string;
+  signals:  string;
+  simTime:  string;
+  period:   string;
+  rushMult: number;
 }
 
 export interface TrailPoint {
@@ -59,12 +76,20 @@ export interface TrailPoint {
   y: number;
 }
 
-// Raw OSM element types
+export interface PolylineData {
+  polyline:       import('leaflet').Polyline;
+  nodeSeq:        number[];
+  originalColor:  string;
+  originalWeight: number;
+  closed:         boolean;
+}
+
+// Raw OSM types
 export interface OSMElement {
-  type: 'node' | 'way' | 'relation';
-  id: number;
-  lat?: number;
-  lon?: number;
+  type:  'node' | 'way' | 'relation';
+  id:    number;
+  lat?:  number;
+  lon?:  number;
   nodes?: number[];
   tags?: Record<string, string>;
 }
@@ -72,3 +97,6 @@ export interface OSMElement {
 export interface OverpassResponse {
   elements: OSMElement[];
 }
+
+/** Trails auto-disable above this car count */
+export const TRAIL_MAX_CARS = 400;

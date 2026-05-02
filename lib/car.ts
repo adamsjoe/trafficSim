@@ -1,4 +1,4 @@
-import type { RoadGraph, TrailPoint } from './types';
+import type { CarUpdateConfig, RoadGraph, TrailPoint } from './types';
 
 export const CAR_PALETTE = [
   '#ffb347', '#ff6b6b', '#ffd93d', '#b6f36a',
@@ -7,7 +7,6 @@ export const CAR_PALETTE = [
   '#e056fd', '#0be881', '#f8b400', '#ff5e57',
 ] as const;
 
-/** Approximate metres between two lat/lng points (good enough for short edges). */
 function edgeMetres(aLat: number, aLng: number, bLat: number, bLng: number): number {
   const dlat = (bLat - aLat) * 111_320;
   const dlng = (bLng - aLng) * 111_320 * Math.cos((aLat * Math.PI) / 180);
@@ -15,87 +14,164 @@ function edgeMetres(aLat: number, aLng: number, bLat: number, bLng: number): num
 }
 
 export class Car {
-  cur: number;
-  nxt: number;
-  /** Progress along current edge [0, 1) */
-  t: number;
-  prevNode: number;
-  color: string;
-  trail: TrailPoint[];
+  cur:         number;
+  nxt:         number;
+  t:           number;
+  prevNode:    number;
+  color:       string;
+  trail:       TrailPoint[];
+  /** 0 = stopped, 1 = full road speed */
+  speedFactor: number;
+  /** Waiting at a red signal */
+  waiting:     boolean;
 
   private graph: RoadGraph;
 
   constructor(graph: RoadGraph) {
-    this.graph = graph;
-    this.color = CAR_PALETTE[Math.floor(Math.random() * CAR_PALETTE.length)];
-    this.trail = [];
-    this.prevNode = -1;
-    this.cur = 0;
-    this.nxt = 0;
-    this.t = 0;
+    this.graph       = graph;
+    this.color       = CAR_PALETTE[Math.floor(Math.random() * CAR_PALETTE.length)];
+    this.trail       = [];
+    this.prevNode    = -1;
+    this.cur         = 0;
+    this.nxt         = 0;
+    this.t           = 0;
+    this.speedFactor = 1;
+    this.waiting     = false;
     this.place();
   }
 
-  /** Teleport to a random node and pick a random neighbour. */
-  place(): void {
-    const { nodeIds, edges } = this.graph;
-    if (nodeIds.length === 0) return;
-
-    this.cur = nodeIds[Math.floor(Math.random() * nodeIds.length)];
-    const nb = edges[this.cur];
-    if (!nb || nb.length === 0) return;
-
-    this.nxt = nb[Math.floor(Math.random() * nb.length)];
-    this.t = Math.random();
-    this.trail = [];
-    this.prevNode = -1;
+  // ── Edge count helpers ───────────────────────────────────────────────────────
+  private enterEdge(a: number, b: number) {
+    const key = `${a}-${b}`;
+    this.graph.edgeCounts.set(key, (this.graph.edgeCounts.get(key) ?? 0) + 1);
   }
 
-  /**
-   * Advance the car by `dt` milliseconds at the given speed multiplier.
-   * Base speed ≈ 11 m/s (~40 km/h). Respects graph.closedEdges.
-   */
-  update(dt: number, speedMult: number): void {
-    const { nodes, edges, closedEdges } = this.graph;
-    const a = nodes[this.cur];
-    const b = nodes[this.nxt];
-    if (!a || !b) { this.place(); return; }
+  private leaveEdge(a: number, b: number) {
+    const key   = `${a}-${b}`;
+    const count = this.graph.edgeCounts.get(key) ?? 0;
+    if (count > 0) this.graph.edgeCounts.set(key, count - 1);
+    else this.graph.edgeCounts.delete(key);
+  }
 
-    const dist = edgeMetres(a.lat, a.lng, b.lat, b.lng);
-    const step = (11 * speedMult * dt) / (dist * 1000);
-    this.t += step;
+  // ── Placement ────────────────────────────────────────────────────────────────
+  place(): void {
+    // Leave current edge before teleporting
+    if (this.cur !== 0) this.leaveEdge(this.cur, this.nxt);
 
-    // Advance nodes when edge is complete
-    while (this.t >= 1) {
-      this.t -= 1;
-      this.prevNode = this.cur;
-      this.cur = this.nxt;
+    const { nodeIds, edges } = this.graph;
+    if (!nodeIds.length) return;
 
-      const nb = edges[this.cur];
-      if (!nb || nb.length === 0) { this.place(); return; }
+    this.cur      = nodeIds[Math.floor(Math.random() * nodeIds.length)];
+    const nb      = edges[this.cur];
+    if (!nb?.length) return;
 
-      // Filter out closed edges, then avoid U-turns
-      const open = nb.filter((n) => !closedEdges.has(`${this.cur}-${n}`));
-      const pool = open.length > 0 ? open : nb; // fallback to all if everything is closed
-      const fwd  = pool.filter((n) => n !== this.prevNode);
-      const choices = fwd.length > 0 ? fwd : pool;
+    this.nxt      = nb[Math.floor(Math.random() * nb.length)];
+    this.t        = Math.random();
+    this.trail    = [];
+    this.prevNode = -1;
+    this.waiting  = false;
+
+    this.enterEdge(this.cur, this.nxt);
+  }
+
+  /** Called when car is removed from simulation — cleans up edge count */
+  destroy(): void {
+    if (this.cur !== 0) this.leaveEdge(this.cur, this.nxt);
+  }
+
+  // ── Next node selection ──────────────────────────────────────────────────────
+  private chooseNext(cfg: CarUpdateConfig): void {
+    const { edges, closedEdges, edgeWeights } = this.graph;
+    const nb = edges[this.cur];
+    if (!nb?.length) { this.place(); return; }
+
+    const open    = nb.filter((n) => !closedEdges.has(`${this.cur}-${n}`));
+    const pool    = open.length ? open : nb;
+    const fwd     = pool.filter((n) => n !== this.prevNode);
+    const choices = fwd.length ? fwd : pool;
+
+    if (cfg.weightedRouting && choices.length > 1) {
+      // Roulette wheel weighted by road speed class
+      const weights = choices.map((n) => edgeWeights.get(`${this.cur}-${n}`) ?? 1.0);
+      const total   = weights.reduce((a, b) => a + b, 0);
+      let rand      = Math.random() * total;
+      for (let i = 0; i < choices.length; i++) {
+        rand -= weights[i];
+        if (rand <= 0) { this.nxt = choices[i]; return; }
+      }
+      this.nxt = choices[choices.length - 1];
+    } else {
       this.nxt = choices[Math.floor(Math.random() * choices.length)];
     }
   }
 
-  getLatLng(): { lat: number; lng: number } | null {
-    const { nodes } = this.graph;
+  // ── Update ───────────────────────────────────────────────────────────────────
+  update(dt: number, cfg: CarUpdateConfig): void {
+    const { nodes, edgeCounts, edgeWeights, signalNodes } = this.graph;
+
+    // ── Release from red light when signal turns green ───────────────────────
+    if (this.waiting) {
+      const isSignalNode = cfg.signals && signalNodes.has(this.nxt);
+      if (isSignalNode) {
+        const phase   = signalNodes.get(this.nxt)!;
+        const isGreen = ((cfg.simTime + phase) % 90) < 45;
+        if (!isGreen) { this.speedFactor = 0; return; }
+      }
+      this.waiting = false;
+    }
+
     const a = nodes[this.cur];
     const b = nodes[this.nxt];
-    if (!a || !b) return null;
+    if (!a || !b) { this.place(); return; }
 
+    // ── Speed computation ────────────────────────────────────────────────────
+    const roadWeight      = cfg.weightedRouting
+      ? (edgeWeights.get(`${this.cur}-${this.nxt}`) ?? 1.0)
+      : 1.0;
+    const edgeCount       = cfg.congestion
+      ? (edgeCounts.get(`${this.cur}-${this.nxt}`) ?? 0)
+      : 0;
+    const congestionFactor = 1 / (1 + 0.05 * edgeCount);
+
+    this.speedFactor = Math.min(1, roadWeight * congestionFactor);
+
+    const dist  = edgeMetres(a.lat, a.lng, b.lat, b.lng);
+    const speed = 11 * cfg.speedMult * roadWeight * congestionFactor;
+    this.t += (speed * dt) / (dist * 1_000);
+
+    // ── Advance to next edge ─────────────────────────────────────────────────
+    while (this.t >= 1) {
+      // Check signal BEFORE crossing the junction
+      if (cfg.signals && signalNodes.has(this.nxt)) {
+        const phase   = signalNodes.get(this.nxt)!;
+        const isGreen = ((cfg.simTime + phase) % 90) < 45;
+        if (!isGreen) {
+          // Hold visibly on the approach, not past the junction
+          this.t           = 0.97;
+          this.waiting     = true;
+          this.speedFactor = 0;
+          return;
+        }
+      }
+
+      this.t -= 1;
+      this.leaveEdge(this.cur, this.nxt);
+      this.prevNode = this.cur;
+      this.cur      = this.nxt;
+      this.chooseNext(cfg);
+      this.enterEdge(this.cur, this.nxt);
+    }
+  }
+
+  getLatLng(): { lat: number; lng: number } | null {
+    const a = this.graph.nodes[this.cur];
+    const b = this.graph.nodes[this.nxt];
+    if (!a || !b) return null;
     return {
       lat: a.lat + (b.lat - a.lat) * this.t,
       lng: a.lng + (b.lng - a.lng) * this.t,
     };
   }
 
-  clearTrail(): void {
-    this.trail = [];
-  }
+  clearTrail(): void { this.trail = []; }
 }

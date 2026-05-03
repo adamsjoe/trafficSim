@@ -1,4 +1,5 @@
 import type { CarUpdateConfig, RoadGraph, TrailPoint } from './types';
+import { isSignalGreen } from './rushHour';
 
 export const CAR_PALETTE = [
   '#ffb347', '#ff6b6b', '#ffd93d', '#b6f36a',
@@ -113,9 +114,8 @@ export class Car {
     if (this.waiting) {
       const isSignalNode = cfg.signals && signalNodes.has(this.nxt);
       if (isSignalNode) {
-        const phase   = signalNodes.get(this.nxt)!;
-        const isGreen = ((cfg.simTime + phase) % 90) < 45;
-        if (!isGreen) { this.speedFactor = 0; return; }
+        const phase = signalNodes.get(this.nxt)!;
+        if (!isSignalGreen(cfg.signalTime, phase)) { this.speedFactor = 0; return; }
       }
       this.waiting = false;
     }
@@ -143,10 +143,8 @@ export class Car {
     while (this.t >= 1) {
       // Check signal BEFORE crossing the junction
       if (cfg.signals && signalNodes.has(this.nxt)) {
-        const phase   = signalNodes.get(this.nxt)!;
-        const isGreen = ((cfg.simTime + phase) % 90) < 45;
-        if (!isGreen) {
-          // Hold visibly on the approach, not past the junction
+        const phase = signalNodes.get(this.nxt)!;
+        if (!isSignalGreen(cfg.signalTime, phase)) {
           this.t           = 0.97;
           this.waiting     = true;
           this.speedFactor = 0;

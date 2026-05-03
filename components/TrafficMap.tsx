@@ -20,7 +20,7 @@ import { buildGraph, countEdges, fetchRoadData, geocodeLocation } from '@/lib/ov
 import { fmtN } from '@/lib/utils';
 import { createWebGLRenderer, hexToRgb } from '@/lib/webglRenderer';
 import type { WebGLRenderer } from '@/lib/webglRenderer';
-import { formatSimTime, getPeriodName, getRushMultiplier, speedToRgb } from '@/lib/rushHour';
+import { formatSimTime, getPeriodName, getRushMultiplier, getSignalPhase, signalPhaseColor, speedToRgb } from '@/lib/rushHour';
 import ControlPanel from './ControlPanel';
 import InfoModal from './InfoModal';
 
@@ -48,7 +48,8 @@ export default function TrafficMap() {
   const fpsBufRef       = useRef(60);
   const polylineDataRef = useRef<PolylineData[]>([]);
   const hitPolylinesRef = useRef<import('leaflet').Polyline[]>([]);
-  const simTimeRef      = useRef(SIM_START_SECS);
+  const simTimeRef      = useRef(SIM_START_SECS);  // rush hour clock — advances at timeScale
+  const signalTimeRef   = useRef(0);               // signal clock  — always real seconds
 
   // Refs that mirror state for rAF loop access
   const paramsRef  = useRef<SimParams>({ carCount: 50, speedMult: 1, trailLength: 10, carSize: 8, glowRadius: 5, roadOpacity: 0.5 });
@@ -79,8 +80,25 @@ export default function TrafficMap() {
     initRef.current = true;
 
     import('leaflet').then((L) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      delete (L.Icon.Default.prototype as any)._getIconUrl;
+      // Polyfill roundRect for browsers that don't support it yet
+      if (!CanvasRenderingContext2D.prototype.roundRect) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (CanvasRenderingContext2D.prototype as any).roundRect = function(
+          x: number, y: number, w: number, h: number, r: number
+        ) {
+          this.beginPath();
+          this.moveTo(x + r, y);
+          this.lineTo(x + w - r, y);
+          this.quadraticCurveTo(x + w, y, x + w, y + r);
+          this.lineTo(x + w, y + h - r);
+          this.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+          this.lineTo(x + r, y + h);
+          this.quadraticCurveTo(x, y + h, x, y + h - r);
+          this.lineTo(x, y + r);
+          this.quadraticCurveTo(x, y, x + r, y);
+          this.closePath();
+        };
+      }
       L.Icon.Default.mergeOptions({
         iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
         iconUrl:       'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
@@ -262,9 +280,12 @@ export default function TrafficMap() {
       const tc  = trailCtxRef.current;
       const tcv = trailCanvasRef.current;
 
-      // ── Sim clock — always ticks so signals change ─────────────────────────
-      simTimeRef.current += (dt / 1000) * r.timeScale;
+      // ── Sim clock — rushHour time scale ───────────────────────────────────
+      simTimeRef.current   += (dt / 1000) * r.timeScale;
       if (simTimeRef.current >= 86400) simTimeRef.current -= 86400;
+
+      // ── Signal clock — always real seconds ────────────────────────────────
+      signalTimeRef.current += dt / 1000;
 
       // ── Rush hour car count scaling ────────────────────────────────────────
       let effectiveCarCount = p.carCount;
@@ -282,6 +303,7 @@ export default function TrafficMap() {
       const cfg: CarUpdateConfig = {
         speedMult:       p.speedMult,
         simTime:         simTimeRef.current,
+        signalTime:      signalTimeRef.current,
         congestion:      r.congestion,
         weightedRouting: r.weightedRouting,
         signals:         r.signals,
@@ -297,20 +319,49 @@ export default function TrafficMap() {
       const doTrails = p.trailLength > 0 && cars.length <= TRAIL_MAX_CARS;
       if (tc && tcv) tc.clearRect(0, 0, tcv.width, tcv.height);
 
-      // ── Draw signals on trail canvas ───────────────────────────────────────
+      // ── Draw UK signal boxes on trail canvas ───────────────────────────────
       if (tc && r.signals && graph.signalNodes.size > 0 && mi.getZoom() >= 14) {
-        graph.signalNodes.forEach((phase, nodeId) => {
+        graph.signalNodes.forEach((phaseOffset, nodeId) => {
           const node = graph.nodes[nodeId];
           if (!node) return;
-          const pt      = mi.latLngToContainerPoint([node.lat, node.lng]);
-          const isGreen = ((simTimeRef.current + phase) % 90) < 45;
+
+          const pt    = mi.latLngToContainerPoint([node.lat, node.lng]);
+          const phase = getSignalPhase(signalTimeRef.current, phaseOffset);
+          const color = signalPhaseColor(phase);
+
+          // Black housing
+          const bw = 7, bh = 18, br = 2;
+          const bx = pt.x - bw / 2, by = pt.y - bh / 2;
+          tc.fillStyle = 'rgba(0,0,0,0.75)';
           tc.beginPath();
-          tc.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
-          tc.fillStyle   = isGreen ? '#00e840' : '#ff2244';
+          tc.roundRect(bx, by, bw, bh, br);
           tc.fill();
-          tc.strokeStyle = 'rgba(0,0,0,0.6)';
-          tc.lineWidth   = 1;
-          tc.stroke();
+
+          // Top pip — red (lit on red and red-amber)
+          const litRed   = phase === 'red' || phase === 'red-amber';
+          tc.beginPath();
+          tc.arc(pt.x, by + 4, 2.2, 0, Math.PI * 2);
+          tc.fillStyle = litRed ? '#ff2244' : '#330008';
+          tc.fill();
+
+          // Middle pip — amber (lit on red-amber and amber)
+          const litAmber = phase === 'red-amber' || phase === 'amber';
+          tc.beginPath();
+          tc.arc(pt.x, pt.y, 2.2, 0, Math.PI * 2);
+          tc.fillStyle = litAmber ? '#ffaa00' : '#332200';
+          tc.fill();
+
+          // Bottom pip — green (lit on green)
+          tc.beginPath();
+          tc.arc(pt.x, by + bh - 4, 2.2, 0, Math.PI * 2);
+          tc.fillStyle = phase === 'green' ? '#00e840' : '#003310';
+          tc.fill();
+
+          // Outer glow on active colour
+          tc.beginPath();
+          tc.arc(pt.x, pt.y, 7, 0, Math.PI * 2);
+          tc.fillStyle = color + '22';
+          tc.fill();
         });
       }
 

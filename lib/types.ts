@@ -37,7 +37,8 @@ export interface RealismSettings {
 
 export interface CarUpdateConfig {
   speedMult:       number;
-  simTime:         number;   // seconds from midnight
+  simTime:         number;   // rush hour clock — seconds from midnight
+  signalTime:      number;   // real-time signal clock — always wall seconds
   congestion:      boolean;
   weightedRouting: boolean;
   signals:         boolean;

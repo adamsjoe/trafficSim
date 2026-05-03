@@ -1,4 +1,38 @@
-/** Rush hour multiplier curve — piecewise linear, keyed by hour of day */
+/**
+ * UK traffic light sequence (90s total cycle):
+ *   0–44  RED        (45s) — stop
+ *  45–47  RED+AMBER  ( 3s) — prepare to go, still stop
+ *  48–86  GREEN      (39s) — go
+ *  87–89  AMBER      ( 3s) — stop (or clear junction if already crossing)
+ */
+export type SignalPhase = 'red' | 'red-amber' | 'green' | 'amber';
+
+export const SIGNAL_CYCLE = 90; // seconds
+
+export function getSignalPhase(simTime: number, phaseOffset: number): SignalPhase {
+  const t = ((simTime + phaseOffset) % SIGNAL_CYCLE + SIGNAL_CYCLE) % SIGNAL_CYCLE;
+  if (t < 45) return 'red';
+  if (t < 48) return 'red-amber';
+  if (t < 87) return 'green';
+  return 'amber';
+}
+
+/** True only during green phase — cars may proceed */
+export function isSignalGreen(simTime: number, phaseOffset: number): boolean {
+  return getSignalPhase(simTime, phaseOffset) === 'green';
+}
+
+/** Canvas fill colour for each UK phase */
+export function signalPhaseColor(phase: SignalPhase): string {
+  switch (phase) {
+    case 'red':       return '#ff2244';
+    case 'red-amber': return '#ff7700';
+    case 'green':     return '#00e840';
+    case 'amber':     return '#ffaa00';
+  }
+}
+
+
 const CURVE: [hour: number, mult: number][] = [
   [0,  0.12],
   [5,  0.22],

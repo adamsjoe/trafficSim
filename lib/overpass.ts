@@ -26,7 +26,7 @@ export async function fetchRoadData(
 );
 out body;`.trim();
 
-  const res = await fetch('https://overpass-api.de/api/interpreter', {
+  const res = await fetch('/api/overpass', {
     method:  'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body:    'data=' + encodeURIComponent(query),

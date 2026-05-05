@@ -30,7 +30,7 @@ export class Car {
 
   constructor(graph: RoadGraph) {
     this.graph       = graph;
-    this.color       = CAR_PALETTE[Math.floor(Math.random() * CAR_PALETTE.length)];
+    this.color       = CAR_PALETTE[Math.floor(Math.random() * CAR_PALETTE.length)] ?? CAR_PALETTE[0];
     this.trail       = [];
     this.prevNode    = -1;
     this.cur         = 0;
@@ -62,11 +62,11 @@ export class Car {
     const { nodeIds, edges } = this.graph;
     if (!nodeIds.length) return;
 
-    this.cur      = nodeIds[Math.floor(Math.random() * nodeIds.length)];
+    this.cur      = nodeIds[Math.floor(Math.random() * nodeIds.length)] ?? 0;
     const nb      = edges[this.cur];
     if (!nb?.length) return;
 
-    this.nxt      = nb[Math.floor(Math.random() * nb.length)];
+    this.nxt      = nb[Math.floor(Math.random() * nb.length)] ?? 0;
     this.t        = Math.random();
     this.trail    = [];
     this.prevNode = -1;
@@ -97,12 +97,12 @@ export class Car {
       const total   = weights.reduce((a, b) => a + b, 0);
       let rand      = Math.random() * total;
       for (let i = 0; i < choices.length; i++) {
-        rand -= weights[i];
-        if (rand <= 0) { this.nxt = choices[i]; return; }
+        rand -= weights[i] ?? 0;
+        if (rand <= 0) { this.nxt = choices[i] ?? this.nxt; return; }
       }
-      this.nxt = choices[choices.length - 1];
+      this.nxt = choices[choices.length - 1] ?? this.nxt;
     } else {
-      this.nxt = choices[Math.floor(Math.random() * choices.length)];
+      this.nxt = choices[Math.floor(Math.random() * choices.length)] ?? this.nxt;
     }
   }
 

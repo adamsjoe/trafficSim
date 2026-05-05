@@ -52,8 +52,11 @@ const CURVE: [hour: number, mult: number][] = [
 
 export function getRushMultiplier(hour: number): number {
   for (let i = 1; i < CURVE.length; i++) {
-    const [h0, m0] = CURVE[i - 1];
-    const [h1, m1] = CURVE[i];
+    const prev = CURVE[i - 1];
+    const curr = CURVE[i];
+    if (!prev || !curr) continue;
+    const [h0, m0] = prev;
+    const [h1, m1] = curr;
     if (hour <= h1) {
       const t = (hour - h0) / (h1 - h0);
       return m0 + (m1 - m0) * t;

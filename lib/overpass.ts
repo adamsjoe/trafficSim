@@ -53,13 +53,14 @@ export function buildGraph(data: OverpassResponse): RoadGraph {
   for (const el of data.elements) {
     if (el.type !== 'way' || !el.nodes) continue;
 
-    const ht      = el.tags?.highway ?? 'residential';
-    const oneway  = el.tags?.oneway === 'yes';
+    const ht      = el.tags?.['highway'] ?? 'residential';
+    const oneway  = el.tags?.['oneway'] === 'yes';
     const speed   = ROAD_SPEED[ht] ?? 0.6;
     const nds     = el.nodes;
 
     for (let i = 0; i < nds.length - 1; i++) {
       const a = nds[i], b = nds[i + 1];
+      if (a === undefined || b === undefined) continue;
       if (!nodes[a] || !nodes[b]) continue;
 
       if (!edges[a]) edges[a] = [];
@@ -83,7 +84,7 @@ export function buildGraph(data: OverpassResponse): RoadGraph {
 
   // Collect traffic signal nodes
   for (const el of data.elements) {
-    if (el.type === 'node' && el.tags?.highway === 'traffic_signals') {
+    if (el.type === 'node' && el.tags?.['highway'] === 'traffic_signals') {
       // Deterministic phase offset based on node ID so lights don't all cycle together
       const phase = (el.id * 7 + 13) % 90;
       signalNodes.set(el.id, phase);
@@ -92,7 +93,7 @@ export function buildGraph(data: OverpassResponse): RoadGraph {
 
   const nodeIds = Object.keys(edges)
     .map(Number)
-    .filter((id) => edges[id].length > 0);
+    .filter((id) => (edges[id]?.length ?? 0) > 0);
 
   return {
     nodes,
@@ -119,7 +120,9 @@ export async function geocodeLocation(query: string): Promise<{ lat: number; lng
   if (!res.ok) throw new Error(`Nominatim HTTP ${res.status}`);
   const data = await res.json() as Array<{ lat: string; lon: string; display_name: string }>;
   if (!data.length) throw new Error('Location not found');
-  const { lat, lon, display_name } = data[0];
+  const first = data[0];
+  if (!first) throw new Error('Location not found');
+  const { lat, lon, display_name } = first;
   return {
     lat: parseFloat(lat),
     lng: parseFloat(lon),

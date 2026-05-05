@@ -208,10 +208,11 @@ export default function TrafficMap() {
       const L = await import('leaflet');
       for (const el of data.elements) {
         if (el.type !== 'way' || !el.nodes) continue;
-        const ht      = el.tags?.highway ?? 'residential';
-        const cfg     = roadTypes[ht] ?? roadTypes.residential;
+        const ht      = el.tags?.['highway'] ?? 'residential';
+        const cfg     = roadTypes[ht] ?? roadTypes['residential'];
+        if (!cfg) continue;
         const nodeSeq = el.nodes.filter((id) => graph.nodes[id]);
-        const pts     = nodeSeq.map((id) => [graph.nodes[id].lat, graph.nodes[id].lng] as [number, number]);
+        const pts     = nodeSeq.map((id) => [graph.nodes[id]!.lat, graph.nodes[id]!.lng] as [number, number]);
         if (pts.length < 2) continue;
 
         const visual = L.polyline(pts, { color: cfg.color, weight: cfg.weight, opacity: paramsRef.current.roadOpacity, interactive: false }).addTo(map);
@@ -384,10 +385,11 @@ export default function TrafficMap() {
         if (doTrails && tc) {
           car.trail.push({ x: pt.x, y: pt.y });
           if (car.trail.length > p.trailLength) car.trail.shift();
-          if (car.trail.length > 1) {
+          const trailHead = car.trail[0];
+          if (car.trail.length > 1 && trailHead) {
             tc.beginPath();
-            tc.moveTo(car.trail[0].x, car.trail[0].y);
-            for (let i = 1; i < car.trail.length; i++) tc.lineTo(car.trail[i].x, car.trail[i].y);
+            tc.moveTo(trailHead.x, trailHead.y);
+            for (let i = 1; i < car.trail.length; i++) { const tp = car.trail[i]; if (tp) tc.lineTo(tp.x, tp.y); }
             tc.strokeStyle = car.color + '55';
             tc.lineWidth   = Math.max(1, p.carSize - 1);
             tc.lineCap = 'round'; tc.lineJoin = 'round';
@@ -453,7 +455,11 @@ export default function TrafficMap() {
   }, []);
 
   const handleRoadTypeToggle = useCallback((key: string, enabled: boolean) => {
-    setRoadTypes((prev) => ({ ...prev, [key]: { ...prev[key], enabled } }));
+    setRoadTypes((prev) => {
+      const existing = prev[key];
+      if (!existing) return prev;
+      return { ...prev, [key]: { ...existing, enabled } };
+    });
   }, []);
 
   // ── Render ────────────────────────────────────────────────────────────────────
